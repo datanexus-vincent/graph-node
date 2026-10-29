@@ -1,5 +1,11 @@
 # NEWS
 
+## Unreleased
+
+### Upgrade Notes
+
+- **`deployment_sync_secs` attribution changed for two sections.** The `process_triggers` section again covers only trigger matching and handler execution, as it did when it was added; since the runner refactor it had also covered the stages that follow, which have sections of their own. Time between those stages now counts towards `process_block` instead of `process_triggers`.
+
 ## v0.45.0
 
 ```

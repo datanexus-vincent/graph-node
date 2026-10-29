@@ -1098,7 +1098,7 @@ where
             vid_gen,
         );
 
-        let _section = self
+        let section = self
             .metrics
             .stream
             .stopwatch
@@ -1133,6 +1133,10 @@ where
             // See also b21fa73b-6453-4340-99fb-1a78ec62efb1.
             Err(MappingError::PossibleReorg(e)) => return Err(ProcessingError::PossibleReorg(e)),
         }
+
+        // The later stages have sections of their own and are not part
+        // of trigger processing.
+        section.end();
 
         // Check if there are any datasources that have expired in this block. ie: the end_block
         // of that data source is equal to the block number of the current block.
