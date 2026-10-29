@@ -94,6 +94,74 @@ const DELETE_OPERATION_CHUNK_SIZE: usize = 1_000;
 pub const STRING_PREFIX_SIZE: usize = 256;
 pub const BYTE_ARRAY_PREFIX_SIZE: usize = 64;
 
+/// SQL text in logs and spans is cut to this many bytes (20kB).
+const SQL_TEXT_MAXLEN: usize = 20_480;
+
+/// Cut `text` to at most `max` bytes, on a char boundary and including
+/// the marker that shows it was cut.
+fn truncate_sql(text: &mut String, max: usize) {
+    const MARKER: &str = " ...";
+    if text.len() <= max {
+        return;
+    }
+    // Leave room for the marker when it fits at all.
+    let mut end = if max >= MARKER.len() {
+        max - MARKER.len()
+    } else {
+        max
+    };
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.truncate(end);
+    if max >= MARKER.len() {
+        text.push_str(MARKER);
+    }
+}
+
+#[cfg(test)]
+mod truncate_sql_tests {
+    use super::truncate_sql;
+
+    #[test]
+    fn keeps_short_text() {
+        let mut text = "select 1".to_string();
+        truncate_sql(&mut text, 20);
+        assert_eq!(text, "select 1");
+        assert!(text.len() <= 20);
+    }
+
+    #[test]
+    fn stays_within_max_bytes() {
+        let mut text = "x".repeat(100);
+        truncate_sql(&mut text, 10);
+        assert_eq!(text, "xxxxxx ...");
+        assert!(text.len() <= 10);
+    }
+
+    #[test]
+    fn respects_char_boundaries() {
+        // Each `ü` is two bytes; a cut at 7 would split one.
+        let mut text = "ü".repeat(50);
+        truncate_sql(&mut text, 11);
+        assert_eq!(text, "üüü ...");
+        assert!(text.len() <= 11);
+    }
+
+    #[test]
+    fn max_smaller_than_marker() {
+        let mut text = "abcdef".to_string();
+        truncate_sql(&mut text, 2);
+        assert_eq!(text, "ab");
+        assert!(text.len() <= 2);
+
+        let mut text = "üüü".to_string();
+        truncate_sql(&mut text, 3);
+        assert_eq!(text, "ü");
+        assert!(text.len() <= 3);
+    }
+}
+
 lazy_static! {
     pub(crate) static ref STATEMENT_TIMEOUT: Option<String> = ENV_VARS
         .graphql
@@ -851,8 +919,7 @@ impl Layout {
             entity_count: usize,
             trace: bool,
         ) -> Trace {
-            // 20kB
-            const MAXLEN: usize = 20_480;
+            const MAXLEN: usize = SQL_TEXT_MAXLEN;
 
             if !ENV_VARS.log_sql_timing() && !trace {
                 return Trace::None;
@@ -870,10 +937,7 @@ impl Layout {
                 // If the query + bind variables is more than MAXLEN, truncate it;
                 // this will happen when queries have very large bind variables
                 // (e.g., long arrays of string ids)
-                if text.len() > MAXLEN {
-                    text.truncate(MAXLEN);
-                    text.push_str(" ...");
-                }
+                truncate_sql(&mut text, MAXLEN);
                 info!(
                     logger,
                     "Query timing (SQL)";

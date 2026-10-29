@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Bug Fixes
+
+- With `GRAPH_LOG_QUERY_TIMING` including `sql`, a query whose SQL text with bind values exceeded 20kB could panic the request when the cut fell inside a multibyte character. The text is now cut on a character boundary.
+
 ### Upgrade Notes
 
 - **`deployment_sync_secs` attribution changed for two sections.** The `process_triggers` section again covers only trigger matching and handler execution, as it did when it was added; since the runner refactor it had also covered the stages that follow, which have sections of their own. Time between those stages now counts towards `process_block` instead of `process_triggers`. The `host_export_store_set__wasm_instance_context_store_set` section is gone; it never measured anything.
