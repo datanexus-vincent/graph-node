@@ -680,3 +680,63 @@ fn write_batch_links_block_traces() {
         }
     });
 }
+
+#[test]
+fn db_query_spans_join_the_attached_trace() {
+    use graph::prelude::{AttributeNames, BLOCK_NUMBER_MAX, EntityCollection, EntityQuery};
+    use graph::telemetry::Span;
+    use graph::telemetry::testing::install_with;
+
+    let spans = install_with(tracing_groups());
+
+    run_test(move |store, _, _, deployment| async move {
+        let query = || {
+            EntityQuery::new(
+                deployment.hash.clone(),
+                BLOCK_NUMBER_MAX,
+                EntityCollection::All(vec![(COUNTER_TYPE.clone(), AttributeNames::All)]),
+            )
+        };
+        let subgraph_store = store.subgraph_store();
+
+        // With a trace attached to the thread that runs the query, the way
+        // GraphQL execution does it, the query becomes a child span.
+        let mut root = Span::root("graphql_query");
+        root.set_attr("test", "db_query_spans_join_the_attached_trace");
+        let ctx = root.context().unwrap();
+        let (store_clone, query_clone) = (subgraph_store.clone(), query());
+        graph::spawn_blocking_allow_panic(move || {
+            let _guard = ctx.attach();
+            graph::block_on(store_clone.find(query_clone))
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        root.end();
+
+        let roots = spans.spans_with_attr("test", "db_query_spans_join_the_attached_trace");
+        assert_eq!(roots.len(), 1);
+        let queries = spans.children_of(&roots[0]);
+        assert_eq!(queries.len(), 1, "one db_query under the request");
+        let db_query = &queries[0];
+        assert_eq!(db_query.name, "db_query");
+        assert_eq!(
+            db_query.attr("subgraph_id"),
+            Some(deployment.hash.to_string().as_str())
+        );
+        assert_eq!(db_query.attr("entity_count"), Some("0"));
+        assert!(!db_query.is_error);
+
+        // Without an attached trace the query joins nothing: the request
+        // still has its one child, and no `db_query` is a root.
+        subgraph_store.find(query()).await.unwrap();
+        assert_eq!(spans.children_of(&roots[0]).len(), 1);
+        assert!(
+            spans
+                .spans()
+                .iter()
+                .all(|span| span.name != "db_query" || span.parent_span_id.is_some()),
+            "a db_query span without a parent was exported"
+        );
+    });
+}

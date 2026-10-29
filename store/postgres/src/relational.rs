@@ -44,6 +44,7 @@ use graph::schema::{
     InputSchema,
 };
 use graph::slog::{debug, warn};
+use graph::telemetry::{self, Context, Span, SpanGroup};
 use inflector::Inflector;
 use itertools::Itertools;
 use lazy_static::lazy_static;
@@ -967,6 +968,24 @@ impl Layout {
 
         let query_clone = query.clone();
 
+        // The query is a child of whatever trace is attached to this
+        // thread, which is the GraphQL request's when there is one. With
+        // nothing attached there is no span.
+        let mut span = match Context::current() {
+            Some(ctx) if telemetry::group_enabled(SpanGroup::Store) => {
+                Span::child("db_query", &ctx)
+            }
+            _ => Span::noop(),
+        };
+        if span.is_recording() {
+            span.set_attr("subgraph_id", self.site.deployment.to_string());
+            if ENV_VARS.log_sql_timing() {
+                let mut text = debug_query(&query_clone).to_string().replace('\n', "\t");
+                truncate_sql(&mut text, SQL_TEXT_MAXLEN);
+                span.set_attr("sql", text);
+            }
+        }
+
         let start = Instant::now();
         let values = conn
             .transaction(async |conn| {
@@ -977,6 +996,7 @@ impl Layout {
             })
             .await
             .map_err(|e| {
+                span.set_error(&e.to_string());
                 use diesel::result::DatabaseErrorKind;
                 use diesel::result::Error::*;
                 // Sometimes `debug_query(..)` can't be turned into a
@@ -1002,6 +1022,8 @@ impl Layout {
                     )),
                 }
             })?;
+        span.set_attr("entity_count", values.len());
+        span.end();
         let trace = log_query_timing(logger, &query_clone, start.elapsed(), values.len(), trace);
 
         let parent_type = filter_collection.parent_type()?.map(ColumnType::from);
