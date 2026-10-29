@@ -265,6 +265,8 @@ impl WasmInstanceContext<'_> {
         let id: String = asc_get(self, id_ptr, gas)?;
         let data = asc_get(self, data_ptr, gas)?;
 
+        stopwatch.set_attrs_with(|| [("entity_type", entity.clone().into())]);
+
         if self.as_ref().ctx.instrument {
             debug!(self.as_ref().ctx.logger, "store_set";
                     "type" => &entity,
