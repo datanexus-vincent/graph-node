@@ -4,7 +4,7 @@
 
 ### What's New
 
-- **OpenTelemetry tracing.** Setting `GRAPH_OTEL_TRACING=true` exports traces over OTLP (`http/protobuf`) to any collector: one trace per processed block with the handler and, optionally, host function spans under it, and one per batch written by the write queue, linked to the traces of the blocks it contains. `GRAPH_OTEL_SPANS` picks the span groups; the exporter and sampler are configured with the standard `OTEL_*` variables. Off by default, with negligible overhead when off. See [docs/tracing.md](docs/tracing.md).
+- **OpenTelemetry tracing.** Setting `GRAPH_OTEL_TRACING=true` exports traces over OTLP (`http/protobuf`) to any collector: one trace per processed block with the handler and, optionally, host function spans under it, one per batch written by the write queue, linked to the traces of the blocks it contains, and one per GraphQL request that joins the trace of an incoming `traceparent` header. `GRAPH_OTEL_SPANS` picks the span groups; the exporter and sampler are configured with the standard `OTEL_*` variables. Off by default, with negligible overhead when off. See [docs/tracing.md](docs/tracing.md).
 
 ### Bug Fixes
 

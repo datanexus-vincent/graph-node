@@ -184,6 +184,21 @@ With the write queue disabled (`GRAPH_STORE_WRITE_QUEUE=0`), writes happen
 inside `transact_block` and the store sections nest under the block's
 trace instead.
 
+### GraphQL requests
+
+A request's trace starts at the HTTP server. If the request carries a W3C
+[`traceparent`](https://www.w3.org/TR/trace-context/) header, the
+`graphql_query` span joins that trace, so a gateway or client that traces
+its own requests sees graph-node's work inside them. Without the header,
+the request starts a new trace.
+
+Every entity query run for the request becomes a `db_query` child. Other
+SQL the request needs, such as looking up the deployment, is not traced.
+Results served from the query cache run no queries and have no children.
+
+This is separate from the `GRAPH_GRAPHQL_TRACE_TOKEN` feature, which
+returns timing information in the response body of a single request.
+
 ## Sampling
 
 Sampling is decided once per trace, at its root span, by the sampler
@@ -201,6 +216,10 @@ or sample in the collector with the
 [tail sampling processor](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor/tailsamplingprocessor),
 which can keep only slow or failed traces. Tail sampling needs all the
 spans first, so budget for the export volume even if little of it is kept.
+
+A `parentbased_*` sampler follows the decision in the `traceparent` header
+of a GraphQL request, so a client that samples its own requests decides
+whether graph-node's part is kept too.
 
 An unsampled trace records and exports nothing: once the sampler has said
 no at the root, no spans are created under it. What remains is the cost of
