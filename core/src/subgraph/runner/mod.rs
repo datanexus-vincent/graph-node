@@ -42,6 +42,7 @@ use graph::prelude::{
 };
 use graph::schema::EntityKey;
 use graph::slog::{Logger, debug, error, info, o, trace, warn};
+use graph::telemetry::{self, SpanGroup};
 use graph::util::lfu_cache::EvictStats;
 use graph::util::{backoff::ExponentialBackoff, lfu_cache::LfuCache};
 use std::sync::Arc;
@@ -578,9 +579,34 @@ where
         let block_start = Instant::now();
 
         let action = {
-            let stopwatch = &self.metrics.stream.stopwatch;
-            let _section = stopwatch.start_section(PROCESS_BLOCK_SECTION_NAME);
-            self.process_block(block, cursor).await
+            let stopwatch = self.metrics.stream.stopwatch.cheap_clone();
+            // Each block is its own trace. The attributes are only built
+            // when they will be used, since this runs for every block.
+            let attrs = if telemetry::group_enabled(SpanGroup::Block) {
+                vec![
+                    (
+                        "subgraph_id",
+                        self.inputs.deployment.hash.to_string().into(),
+                    ),
+                    ("block_number", block_ptr.number.into()),
+                    ("block_hash", block_ptr.hash_hex().into()),
+                    ("network", self.inputs.network.clone().into()),
+                    ("shard", stopwatch.shard().into()),
+                ]
+            } else {
+                vec![]
+            };
+            let _section = stopwatch.start_root_section(
+                PROCESS_BLOCK_SECTION_NAME,
+                SpanGroup::Block,
+                attrs,
+                &[],
+            );
+            let action = self.process_block(block, cursor).await;
+            if let Err(err) = &action {
+                stopwatch.set_error_with(|| err.to_string());
+            }
+            action
         };
 
         let action = self.handle_action(block_start, block_ptr, action).await?;
@@ -720,7 +746,11 @@ where
 
         // Transact entity operations into the store and update the
         // subgraph's block stream pointer
-        let _section = self.metrics.host.stopwatch.start_section("transact_block");
+        let _section = self
+            .metrics
+            .host
+            .stopwatch
+            .start_section_with("transact_block", [("entity_count", mods.len().into())]);
         let start = Instant::now();
 
         // If a deterministic error has happened, make the PoI to be the only entity that'll be stored.
