@@ -92,8 +92,10 @@ impl StopwatchMetrics {
         }
     }
 
-    /// Turns `start_section` and `end_section` into no-ops, no more metrics will be updated.
-    pub fn disable(&self) {
+    /// Stop recording time into the `deployment_sync_secs` counter, which
+    /// measures the time to sync a deployment; called once the deployment
+    /// is synced. The stopwatch does nothing from here on.
+    pub fn stop_recording(&self) {
         self.disabled.store(true, Ordering::SeqCst)
     }
 
